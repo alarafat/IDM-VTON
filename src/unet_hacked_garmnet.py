@@ -37,13 +37,20 @@ from diffusers.models.embeddings import (
     ImageHintTimeEmbedding,
     ImageProjection,
     ImageTimeEmbedding,
-    PositionNet,
+    # PositionNet,
     TextImageProjection,
     TextImageTimeEmbedding,
     TextTimeEmbedding,
     TimestepEmbedding,
     Timesteps,
 )
+import diffusers
+if diffusers.__version__ >'0.25':
+    from diffusers.models.embeddings import GLIGENTextBoundingboxProjection as PositionNet
+else:
+    from diffusers.models.embeddings import PositionNet
+
+
 from diffusers.models.modeling_utils import ModelMixin
 from src.unet_block_hacked_garmnet import (
     UNetMidBlock2D,
@@ -52,8 +59,13 @@ from src.unet_block_hacked_garmnet import (
     get_down_block,
     get_up_block,
 )
+
 from diffusers.models.resnet import Downsample2D, FirDownsample2D, FirUpsample2D, KDownsample2D, KUpsample2D, ResnetBlock2D, Upsample2D
-from diffusers.models.transformer_2d import Transformer2DModel
+
+if diffusers.__version__ >'0.28':
+    from diffusers.models.transformers.transformer_2d import Transformer2DModel
+else:
+    from diffusers.models.transformer_2d import Transformer2DModel
 
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
@@ -597,78 +609,6 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
 
             self.up_blocks.append(up_block)
             prev_output_channel = output_channel
-
-
-
-
-        # encode_output_chs = [
-        #     # 320,
-        #     # 320,
-        #     # 320,
-        #     1280, 
-        #     1280, 
-        #     1280, 
-        #     1280,
-        #     640,
-        #     640
-        # ]
-
-        # encode_output_chs2 = [
-        #     # 320,
-        #     # 320,
-        #     # 320,
-        #     1280, 
-        #     1280,
-        #     640, 
-        #     640, 
-        #     640,
-        #     320
-        # ]
-
-        # encode_num_head_chs3 = [
-        #     # 5,
-        #     # 5,
-        #     # 10,
-        #     20,
-        #     20, 
-        #     20,
-        #     10,
-        #     10, 
-        #     10 
-        # ]
-
-
-        # encode_num_layers_chs4 = [
-        #     # 1,
-        #     # 1,
-        #     # 2,
-        #     10,
-        #     10, 
-        #     10,
-        #     2,
-        #     2, 
-        #     2 
-        # ]
-
-
-        # self.warp_blks = nn.ModuleList([])
-        # self.warp_zeros = nn.ModuleList([])
-
-        # for in_ch, cont_ch,num_head,num_layers in zip(encode_output_chs, encode_output_chs2,encode_num_head_chs3,encode_num_layers_chs4):
-        #     # dim_head = in_ch // self.num_heads
-        #     # dim_head = dim_head // dim_head_denorm
-
-        #     self.warp_blks.append(Transformer2DModel(
-        #     num_attention_heads=num_head,
-        #     attention_head_dim=64,
-        #     in_channels=in_ch,
-        #     num_layers = num_layers,
-        #     cross_attention_dim = cont_ch,
-        #     ))
-            
-        #     self.warp_zeros.append(zero_module(nn.Conv2d(in_ch, in_ch, 1, padding=0)))
-
-
 
         # out
         if norm_num_groups is not None:

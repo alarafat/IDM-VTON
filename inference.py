@@ -422,4 +422,24 @@ def main():
 
 
 if __name__ == "__main__":
+    def parse_args():
+        parser = argparse.ArgumentParser(description="Simple example of a training script.")
+        parser.add_argument("--pretrained_model_name_or_path", type=str, default="yisol/IDM-VTON", required=False, )
+        parser.add_argument("--width", type=int, default=768, )
+        parser.add_argument("--height", type=int, default=1024, )
+        parser.add_argument("--num_inference_steps", type=int, default=30, )
+        parser.add_argument("--output_dir", type=str, default="result", )
+        parser.add_argument("--unpaired", action="store_true", )
+        parser.add_argument("--data_dir", type=str, default="/home/omnious/workspace/yisol/Dataset/zalando")
+        parser.add_argument("--seed", type=int, default=42, )
+        parser.add_argument("--test_batch_size", type=int, default=2, )
+        parser.add_argument("--guidance_scale", type=float, default=2.0, )
+        parser.add_argument("--mixed_precision", type=str, default=None, choices=["no", "fp16", "bf16"], )
+        parser.add_argument("--enable_xformers_memory_efficient_attention", action="store_true",
+                            help="Whether or not to use xformers.")
+        args = parser.parse_args()
+
+        return args
+
+
     main()

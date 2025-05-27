@@ -37,13 +37,19 @@ from diffusers.models.embeddings import (
     ImageHintTimeEmbedding,
     ImageProjection,
     ImageTimeEmbedding,
-    PositionNet,
+    # PositionNet,
     TextImageProjection,
     TextImageTimeEmbedding,
     TextTimeEmbedding,
     TimestepEmbedding,
     Timesteps,
 )
+
+import diffusers
+if diffusers.__version__ >'0.25':
+    from diffusers.models.embeddings import GLIGENTextBoundingboxProjection as PositionNet
+else:
+    from diffusers.models.embeddings import PositionNet
 
 
 from diffusers.models.modeling_utils import ModelMixin
@@ -55,7 +61,12 @@ from src.unet_block_hacked_tryon import (
     get_up_block,
 )
 from diffusers.models.resnet import Downsample2D, FirDownsample2D, FirUpsample2D, KDownsample2D, KUpsample2D, ResnetBlock2D, Upsample2D
-from diffusers.models.transformer_2d import Transformer2DModel
+
+if diffusers.__version__ >'0.28':
+    from diffusers.models.transformers.transformer_2d import Transformer2DModel
+else:
+    from diffusers.models.transformer_2d import Transformer2DModel
+
 import math
 
 from ip_adapter.ip_adapter import Resampler
@@ -841,9 +852,9 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
         def fn_recursive_attn_processor(name: str, module: torch.nn.Module, processor):
             if hasattr(module, "set_processor"):
                 if not isinstance(processor, dict):
-                    module.set_processor(processor, _remove_lora=_remove_lora)
+                    module.set_processor(processor)
                 else:
-                    module.set_processor(processor.pop(f"{name}.processor"), _remove_lora=_remove_lora)
+                    module.set_processor(processor.pop(f"{name}.processor"))
 
             for sub_name, child in module.named_children():
                 fn_recursive_attn_processor(f"{name}.{sub_name}", child, processor)
