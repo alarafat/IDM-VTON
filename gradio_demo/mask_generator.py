@@ -50,6 +50,22 @@ class ObjectSegmentor:
         self.sam2_predictor = SAM2ImagePredictor(self.sam2_model)
         print(f"Models loaded successfully on {self.device}")
 
+    def to(self, device):
+        """Move both Florence and SAM2 models to the specified device."""
+        self.device = torch.device(device)
+        if self.florence_model is not None:
+            self.florence_model.to(self.device)
+        if self.sam2_model is not None:
+            self.sam2_model.to(self.device)
+
+    def unload_from_gpu(self):
+        """Move models to CPU and clear CUDA cache."""
+        self.to("cpu")
+        import gc
+        import torch
+        gc.collect()
+        torch.cuda.empty_cache()
+
     @staticmethod
     def _get_device(device: str) -> torch.device:
         """Determine the appropriate device for inference."""

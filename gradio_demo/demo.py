@@ -140,8 +140,8 @@ def load_models():
 
     # Load the Florence2+SAM2 model for mask generation
     florence2_model_name = "microsoft/Florence-2-large"
-    # sam2_checkpoint = "gradio_demo/sam2_files/checkpoints/sam2.1_hiera_large.pt"
-    sam2_checkpoint = "sam2_files/checkpoints/sam2.1_hiera_large.pt"
+    sam2_checkpoint = "gradio_demo/sam2_files/checkpoints/sam2.1_hiera_large.pt"
+    # sam2_checkpoint = "sam2_files/checkpoints/sam2.1_hiera_large.pt"
     sam2_cfg = "configs/sam2.1/sam2.1_hiera_l.yaml"
     mask_predictor = ObjectSegmentor(florence_model_name=florence2_model_name, sam2_config=sam2_cfg, sam2_checkpoint=sam2_checkpoint)
 
@@ -158,8 +158,9 @@ def perform_tryon(human_img,
                   openpose_model,
                   denoise_steps=30,
                   seed=42):
-    pipe.to(device)
-    pipe.unet_encoder.to(device)
+    cloth_describer.model.to(device)
+    mask_predictor.to(device)
+    openpose_model.preprocessor.body_estimation.model.to(device)
 
     # Get description of the cloth
     question = ("What is this dress? Is it upper body clothing like a shirt or t-shirt, or lower body clothing like pants? "
@@ -173,7 +174,7 @@ def perform_tryon(human_img,
         text_prompt = "Lower body cloth of the person"
         # mask_prompt = "Segment the entire lower body garment in the image. Include the full pants, skirt, or shorts from waist to hem. The mask should cover the complete garment even if it overlaps with background or legs. Avoid excluding any part of the clothing."
     else:
-        text_prompt = "Cloth of the person"
+        text_prompt = "Upper body cloth of the person"
         # mask_prompt = 'Segment the main garment in the image. Ensure that the segmentation includes the entire clothing item as shown, even if some parts are partially occluded or overlap with background or body. The mask can be slightly larger than the garment, but must not miss any part of it.'
 
     print("\n📌 Qwen Output:")
@@ -194,18 +195,21 @@ def perform_tryon(human_img,
                                          box_enlargement=0,
                                          mask_dilation=20,
                                          use_multimask=False)
-        mask = results['masks'][0]
-        mask = mask.resize((768, 1024))
+        # mask = results['masks'][0]
+        # mask = mask.resize((768, 1024))
+
+        binary_mask = results['masks'][0]
+        mask_pil = Image.fromarray((binary_mask * 255).astype(np.uint8), mode='L')
+        mask = mask_pil.resize((768, 1024))
     else:
         openpose_model.preprocessor.body_estimation.model.to(device)
         keypoints = openpose_model(human_img.resize((384, 512)))
         model_parse, _ = parsing_model(human_img.resize((384, 512)))
-        mask, mask_gray = get_mask_location('hd', "upper_body", model_parse, keypoints)
+        mask, _ = get_mask_location('hd', "upper_body", model_parse, keypoints)
         mask = mask.resize((768, 1024))
 
     # Prepare tensor transforms
-    tensor_transfrom = transforms.Compose([transforms.ToTensor(),
-                                           transforms.Normalize([0.5], [0.5])])
+    tensor_transfrom = transforms.Compose([transforms.ToTensor(), transforms.Normalize([0.5], [0.5])])
 
     mask_gray = (1 - transforms.ToTensor()(mask)) * tensor_transfrom(human_img)
     mask_gray = to_pil_image((mask_gray + 1.0) / 2.0)
@@ -223,7 +227,16 @@ def perform_tryon(human_img,
     pose_img = pose_img[:, :, ::-1]
     pose_img = Image.fromarray(pose_img).resize((768, 1024))
 
+
+    # Release GPU memory for pipe loading
+    cloth_describer.model.to("cpu")
+    mask_predictor.unload_from_gpu()
+    openpose_model.preprocessor.body_estimation.model.to("cpu")
+
+
     # Generate try-on result
+    pipe.to(device)
+    pipe.unet_encoder.to(device)
     with torch.no_grad():
         with torch.cuda.amp.autocast():
             with torch.no_grad():
@@ -276,181 +289,107 @@ def perform_tryon(human_img,
 
 
 def main():
-    from matplotlib import pyplot as plt
+    st.title("👕 Virtual Try-On")
+    st.markdown("Upload a person's photo and a garment image to see the virtual try-on result!")
 
-    print("🔄 Loading models...")
+    # Load models
     pipe, cloth_describer, mask_predictor, parsing_model, openpose_model = load_models()
-    print("✅ Models loaded.")
 
-    # Load sample local images (ensure they exist)
-    garment_path = "example/cloth/04469_00.jpg"
-    human_path = "example/human/00055_00.jpg"
+    # Create columns for layout
+    col1, col2 = st.columns(2)
 
-    if not os.path.exists(garment_path) or not os.path.exists(human_path):
-        print("❌ Sample images not found. Place garment.jpg and human.jpg in test_data/")
-        return
+    with col1:
+        st.subheader("👤 Person Image")
 
-    garment_img = Image.open(garment_path).convert("RGB")
-    human_img = Image.open(human_path).convert("RGB")
+        # Option to use webcam or upload
+        input_method = st.radio("Choose input method:",
+                                ["Upload Image", "Use Webcam (Coming Soon)"],
+                                key="input_method")
 
-    # # Try describing the garment
-    # print("🔍 Describing garment image...")
-    # question = ("What is this dress? Is it upper body clothing like a shirt or t-shirt, or lower body clothing like pants? "
-    #             "Classify between [upper/lower], write only [upper or lower], no extra word. Add only one sentence description about the cloth, it's color, cloth type, etc.")
-    #
-    # cloth_position, garment_desc = cloth_describer.describe_image(garment_img, question=question)
-    # print("\n📌 Qwen Output:")
-    # print(cloth_position, " Cloth Description: ", garment_desc)
+        if input_method == "Upload Image":
+            human_img = st.file_uploader("Upload person image",
+                                         type=['png', 'jpg', 'jpeg'],
+                                         key="human")
 
-    result_img, mask_img, generated_mask = perform_tryon(human_img,
-                                                         garment_img,
-                                                         'sam',
-                                                         pipe,
-                                                         cloth_describer,
-                                                         mask_predictor,
-                                                         parsing_model,
-                                                         openpose_model)
+            if human_img is not None:
+                human_image = Image.open(human_img)
+                # st.image(human_image, caption="Person Image", use_column_width=True)
+                st.image(human_image, caption="Person Image", width=300)
+        else:
+            st.info("Webcam functionality will be added in the next update!")
+            human_image = None
 
-    # Show results
-    print("📸 Showing output...")
+    with col2:
+        st.subheader("👔 Garment Image")
+        garment_img = st.file_uploader("Upload garment image",
+                                       type=['png', 'jpg', 'jpeg'],
+                                       key="garment")
 
-    fig, ax = plt.subplots(1, 3, figsize=(15, 5))
-    ax[0].imshow(result_img)
-    ax[0].set_title("Try-On Result")
-
-    ax[1].imshow(generated_mask)
-    ax[1].set_title("Generated Mask (SAM/Parsing)")
-
-    ax[2].imshow(mask_img)
-    ax[2].set_title("Processed Mask Input")
-
-    for a in ax:
-        a.axis("off")
-
-    plt.tight_layout()
-    plt.show(block=True)
-
-    # # Optional: Try splitting it
-    # print("\n📌 Parsed Output:")
-    # lines = cloth_position.strip().split('\n')
-    # clothing_type = lines[0].strip()
-    # description = lines[1].strip() if len(lines) > 1 else ''
-    # print("→ Clothing Type:", clothing_type)
-    # print("→ Description:", description)
-    #
-    # # Optional: visualize images
-    # fig, ax = plt.subplots(1, 2, figsize=(10, 5))
-    # ax[0].imshow(human_img)
-    # ax[0].set_title("Human Image")
-    # ax[1].imshow(garment_img)
-    # ax[1].set_title("Garment Image")
-    # for a in ax: a.axis("off")
-    # plt.tight_layout()
-    # plt.show(block=True)
+        if garment_img is not None:
+            garment_image = Image.open(garment_img)
+            # st.image(garment_image, caption="Garment Image", use_column_width=True)
+            st.image(garment_image, caption="Garment Image", width=300)
 
 
-# def main():
-#     st.title("👕 Virtual Try-On")
-#     st.markdown("Upload a person's photo and a garment image to see the virtual try-on result!")
-#
-#     # Load models
-#     pipe, cloth_describer, mask_predictor, parsing_model, openpose_model = load_models()
-#
-#     # Create columns for layout
-#     col1, col2 = st.columns(2)
-#
-#     with col1:
-#         st.subheader("👤 Person Image")
-#
-#         # Option to use webcam or upload
-#         input_method = st.radio("Choose input method:",
-#                                 ["Upload Image", "Use Webcam (Coming Soon)"],
-#                                 key="input_method")
-#
-#         if input_method == "Upload Image":
-#             human_img = st.file_uploader("Upload person image",
-#                                          type=['png', 'jpg', 'jpeg'],
-#                                          key="human")
-#
-#             if human_img is not None:
-#                 human_image = Image.open(human_img)
-#                 # st.image(human_image, caption="Person Image", use_column_width=True)
-#                 st.image(human_image, caption="Person Image", width=300)
-#         else:
-#             st.info("Webcam functionality will be added in the next update!")
-#             human_image = None
-#
-#     with col2:
-#         st.subheader("👔 Garment Image")
-#         garment_img = st.file_uploader("Upload garment image",
-#                                        type=['png', 'jpg', 'jpeg'],
-#                                        key="garment")
-#
-#         if garment_img is not None:
-#             garment_image = Image.open(garment_img)
-#             # st.image(garment_image, caption="Garment Image", use_column_width=True)
-#             st.image(garment_image, caption="Garment Image", width=300)
-#
-#
-#     # Masking method selection
-#     st.subheader("🎯 Mask Generation Method")
-#     mask_method = st.selectbox("Choose masking method:",
-#                                ["sam", "original"],
-#                                format_func=lambda x: {"sam": "SAM - Segment Anything Model (Best Quality)",
-#                                                       "original": "Original Human Parsing (Slow but Accurate)"}[x],
-#                                help="SAM provides the best results but requires additional setup")
-#
-#     # Try-on button
-#     if st.button("🎯 Try On!", type="primary", use_container_width=True):
-#         if input_method == "Upload Image" and human_img is not None and garment_img is not None:
-#             with st.spinner("Generating try-on result... This may take a few moments."):
-#                 try:
-#                     result_img, mask_img, generated_mask = perform_tryon(human_image,
-#                                                                          garment_image,
-#                                                                          mask_method,
-#                                                                          pipe,
-#                                                                          cloth_describer,
-#                                                                          mask_predictor,
-#                                                                          parsing_model,
-#                                                                          openpose_model)
-#
-#                     # Display results
-#                     st.subheader("✨ Results")
-#                     col1, col2, col3 = st.columns(3)
-#                     with col1:
-#                         st.image(result_img, caption="Try-On Result", use_column_width=True)
-#                     with col2:
-#                         st.image(generated_mask, caption="Generated Mask", use_column_width=True)
-#                     with col3:
-#                         st.image(mask_img, caption="Processed Mask", use_column_width=True)
-#
-#                 except Exception as e:
-#                     st.error(f"An error occurred: {str(e)}")
-#                     st.error("Please make sure all model files are properly installed and accessible.")
-#         else:
-#             st.warning("Please upload both images and provide a garment description.")
-#
-#     # Information boxes
-#     st.markdown("---")
-#     col1, col2 = st.columns(2)
-#
-#     with col1:
-#         st.info("💡 **Masking Methods:**\n"
-#                 "- **SAM**: Best quality, requires setup\n"
-#                 "- **Original**: Uses human parsing, most accurate for complex poses")
-#
-#     with col2:
-#         st.info("🚀 **Coming Soon:**\n"
-#                 "- Webcam integration\n"
-#                 "- Qwen-powered garment description\n"
-#                 "- Real-time try-on preview\n"
-#                 "- Multiple garment categories")
-#
-#     # Footer
-#     st.markdown("---")
-#     st.markdown("📚 **Setup Requirements:** This demo requires IDM-VTON model files. "
-#                 "Check out the [source code](https://github.com/yisol/IDM-VTON) and "
-#                 "[model](https://huggingface.co/yisol/IDM-VTON) for setup instructions.")
+    # Masking method selection
+    st.subheader("🎯 Mask Generation Method")
+    mask_method = st.selectbox("Choose masking method:",
+                               ["sam", "original"],
+                               format_func=lambda x: {"sam": "SAM - Segment Anything Model (Best Quality)",
+                                                      "original": "Original Human Parsing (Slow but Accurate)"}[x],
+                               help="SAM provides the best results but requires additional setup")
+
+    # Try-on button
+    if st.button("🎯 Try On!", type="primary", use_container_width=True):
+        if input_method == "Upload Image" and human_img is not None and garment_img is not None:
+            with st.spinner("Generating try-on result... This may take a few moments."):
+                try:
+                    result_img, mask_img, generated_mask = perform_tryon(human_image,
+                                                                         garment_image,
+                                                                         mask_method,
+                                                                         pipe,
+                                                                         cloth_describer,
+                                                                         mask_predictor,
+                                                                         parsing_model,
+                                                                         openpose_model)
+
+                    # Display results
+                    st.subheader("✨ Results")
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.image(result_img, caption="Try-On Result", use_column_width=True)
+                    with col2:
+                        st.image(generated_mask, caption="Generated Mask", use_column_width=True)
+                    with col3:
+                        st.image(mask_img, caption="Processed Mask", use_column_width=True)
+
+                except Exception as e:
+                    st.error(f"An error occurred: {str(e)}")
+                    st.error("Please make sure all model files are properly installed and accessible.")
+        else:
+            st.warning("Please upload both images and provide a garment description.")
+
+    # Information boxes
+    st.markdown("---")
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.info("💡 **Masking Methods:**\n"
+                "- **SAM**: Best quality, requires setup\n"
+                "- **Original**: Uses human parsing, most accurate for complex poses")
+
+    with col2:
+        st.info("🚀 **Coming Soon:**\n"
+                "- Webcam integration\n"
+                "- Qwen-powered garment description\n"
+                "- Real-time try-on preview\n"
+                "- Multiple garment categories")
+
+    # Footer
+    st.markdown("---")
+    st.markdown("📚 **Setup Requirements:** This demo requires IDM-VTON model files. "
+                "Check out the [source code](https://github.com/yisol/IDM-VTON) and "
+                "[model](https://huggingface.co/yisol/IDM-VTON) for setup instructions.")
 
 
 if __name__ == "__main__":

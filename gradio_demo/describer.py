@@ -1,27 +1,28 @@
+import re
 import numpy as np
-import torch
 from PIL import Image
 
+import torch
 from transformers import Qwen2_5_VLForConditionalGeneration, AutoTokenizer, AutoProcessor, BitsAndBytesConfig
 from qwen_vl_utils import process_vision_info
 
 
 class Describer:
-    def __init__(self, model_name="Qwen/Qwen2.5-VL-7B-Instruct", device=None):
+    def __init__(self, model_name="Qwen/Qwen2.5-VL-3B-Instruct", device=None):
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
 
         print(f"Loading model: {model_name}")
-        bnb_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_compute_dtype=torch.float16,
-            bnb_4bit_use_double_quant=True,
-            bnb_4bit_quant_type="nf4",
-        )
+        # bnb_config = BitsAndBytesConfig(
+        #     load_in_4bit=True,
+        #     bnb_4bit_compute_dtype=torch.float16,
+        #     bnb_4bit_use_double_quant=True,
+        #     bnb_4bit_quant_type="nf4",
+        # )
 
         self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
             model_name,
-            quantization_config=bnb_config,
-            # torch_dtype="auto",
+            # quantization_config=bnb_config,
+            torch_dtype="auto",
             device_map="auto"
         )
 
@@ -31,17 +32,31 @@ class Describer:
 
     @staticmethod
     def parse_output_description(response: str):
-        # Remove any leading/trailing whitespace and brackets
-        lines = response.strip().split("\n")
+        """
+        Parses Qwen response like:
+        "['[upper] This is an upper body clothing item, specifically a shirt...']"
+        Returns: cloth_position = "upper", garment_desc = "This is ..."
+        """
+        # Normalize the input string (strip brackets/quotes if it's a list-like string)
+        response = response.strip().lower()
+        response = response.replace("['", "").replace("']", "").replace('"', '').strip()
 
-        if not lines:
-            return "unknown", "no description"
+        # Try to find 'upper' or 'lower' position
+        match = re.search(r'\b(upper|lower)\b', response)
+        cloth_position = match.group(1) if match else "unknown"
 
-        # Extract position from the first line
-        cloth_position = lines[0].strip().lower().replace('[', '').replace(']', '')
+        # Try to extract a full sentence as description (after position)
+        desc_start = response.find(cloth_position) + len(cloth_position)
+        garment_desc = response[desc_start:].strip(" []:,.")
 
-        # Extract description from the second line or concatenate the rest
-        garment_desc = " ".join(line.strip() for line in lines[1:] if line.strip())
+        # Fallback to default description
+        if not garment_desc:
+            if cloth_position == "upper":
+                garment_desc = "It's an upper part cloth"
+            elif cloth_position == "lower":
+                garment_desc = "It's a lower part cloth"
+            else:
+                garment_desc = "It's a cloth item"
 
         return cloth_position, garment_desc
 
