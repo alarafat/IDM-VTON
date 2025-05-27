@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Environment files
+.env
+.venv/
+venv/
+ENV/
+env.bak/
+
+# Jupyter / IPython
+.ipynb_checkpoints
+
+# Model checkpoints / weights / logs
+ckpt/*
+*.ckpt
+*.pt
+*.pth
+*.log
+*.h5
+*.onnx
+*.tflite
+*.npz
+
+# Output videos/images
+*.mp4
+*.avi
+*.mov
+*.gif
+*.webm
+*.jpg
+*.jpeg
+*.png
+outputs/
+videos/
+results/
+
+# Editor/IDE configs
+.idea/
+.vscode/
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Submodule metadata (do not ignore!)
+# .gitmodules stays tracked
+
